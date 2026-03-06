@@ -1,0 +1,887 @@
+<template>
+  <n-scrollbar>
+    <div class="crm-form-design-formula-header">
+      <div class="ph-prefix">{{ props.fieldConfig.name }} = </div>
+      <n-button type="primary" text @click="handleClearFormulaField">
+        {{ t('common.clear') }}
+      </n-button>
+    </div>
+
+    <div class="crm-form-design-formula-wrapper">
+      <div
+        ref="editor"
+        class="crm-form-design-formula-editor"
+        contenteditable="true"
+        @click="saveCursor"
+        @keyup="saveCursor"
+        @focus="handleFocus"
+        @blur="handleBlur"
+        @input="handleEditorInput"
+      >
+      </div>
+      <div class="diagnose-result mb-[16px] mt-[4px] flex flex-wrap items-center">
+        <div v-for="(item, index) of formulaDiagnostics" class="flex flex-wrap items-center text-[var(--error-red)]">
+          <template v-if="item.functionName"> {{ item.functionName }}： </template>
+          <div class="mr-[8px]">{{ item.message }}</div>
+          <template v-if="formulaDiagnostics.length > 1 && index !== formulaDiagnostics.length - 1"> ；</template>
+        </div>
+      </div>
+      <div class="field-wrapper">
+        <div class="field-item">
+          <div class="field-item-title"> {{ t('common.formFields') }} </div>
+          <CrmSearchInput
+            v-model:value="keyword"
+            class="field-search-input !w-[calc(100%+2px)]"
+            :placeholder="t('crmFormDesign.formulaByNameSearchPlaceholder')"
+          />
+          <div class="field-item-content max-h-[400px]">
+            <n-scrollbar>
+              <CrmCollapse
+                v-for="(ele, index) of allFieldList"
+                :default-expand="true"
+                :name-key="ele.type"
+                class="field-item-collapse"
+              >
+                <template #header>
+                  <div class="px-[4px] text-[14px] font-medium text-[var(--text-n2)]">
+                    {{ t(ele.name) }}（{{ ele.children.length }}）
+                  </div>
+                </template>
+                <template v-if="ele.children.length > 0">
+                  <div
+                    v-for="item of ele.children"
+                    class="flex h-[32px] items-center justify-between rounded px-[4px] hover:bg-[var(--text-n9)]"
+                    @mousedown.prevent="insertField(item)"
+                  >
+                    <n-tooltip trigger="hover" :delay="300" placement="top-start">
+                      <template #trigger>
+                        <div class="one-line-text flex-1 cursor-pointer">
+                          {{ item.name }}
+                        </div>
+                      </template>
+                      {{ item.name }}
+                    </n-tooltip>
+
+                    <CrmTag :type="colorThemeMap[ele.type]?.type || 'default'" class="flex-shrink-0" theme="light">
+                      {{ colorThemeMap[ele.type]?.label }}
+                    </CrmTag>
+                  </div>
+                </template>
+                <div v-else class="px-[4px] text-[var(--text-n4)]">{{ t('common.noData') }}</div>
+                <n-divider
+                  v-if="ele.children.length !== 0 && index !== allFieldList.length - 1"
+                  class="!mb-0 !mt-[16px]"
+                />
+              </CrmCollapse>
+            </n-scrollbar>
+          </div>
+        </div>
+        <div class="field-item">
+          <div class="field-item-title"> {{ t('crmFormDesign.formulaFunction') }} </div>
+          <div class="field-item-content max-h-[428px]">
+            <n-scrollbar>
+              <div v-for="fun of allFunctionSource" class="field-fun-item" @mousedown.prevent="insertField(fun)">
+                <div
+                  :style="{
+                    color: activeFun?.name === fun.name ? FUN_COLOR : 'var(--text-n1)',
+                  }"
+                >
+                  {{ fun.name }}
+                </div>
+                <div class="function-desc-text">{{ fun.description }}</div>
+              </div>
+            </n-scrollbar>
+          </div>
+        </div>
+        <div class="field-item">
+          <div class="field-item-title"> {{ t('crmFormDesign.formulaUsage') }} </div>
+          <div class="field-item-content">
+            <div>
+              <div class="field-fun-item-name">{{ activeFun?.name }}</div>
+              <div class="function-desc-text">{{ activeFun?.description }}</div>
+            </div>
+            <div v-if="activeFun">
+              <div class="text-[var(--text-n1)]">{{ t('crmFormDesign.formulaUsageMethods') }}</div>
+              <div v-if="activeFun?.name === 'DAYS'">
+                <div class="flex items-center">
+                  <div :style="{ color: FUN_COLOR }">DAYS</div>(<div :class="`text-[${DATE_TIME_COLOR}]`">
+                    {{ t('crmFormDesign.formulaExampleEndTime') }} </div
+                  >, <div :class="`text-[${DATE_TIME_COLOR}]`"> {{ t('crmFormDesign.formulaExampleStartTime') }} </div>)
+                </div>
+              </div>
+              <div v-if="activeFun?.name === 'SUM'">
+                <div class="flex items-center">
+                  <div :style="{ color: FUN_COLOR }">SUM</div>(<div :class="`text-[${INPUT_NUMBER_COLOR}]`">
+                    {{ t('formulaEditor.function.argFirst') }} </div
+                  >, <div :class="`text-[${INPUT_NUMBER_COLOR}]`"> {{ t('formulaEditor.function.argSecond') }} </div>,
+                  ... )
+                </div>
+              </div>
+              <div v-if="activeFun?.name === 'CONCATENATE'">
+                <div class="flex items-center">
+                  <div :style="{ color: FUN_COLOR }">CONCATENATE</div>(<div :class="`text-[${INPUT_NUMBER_COLOR}]`">
+                    {{ t('formulaEditor.function.argFirst') }} </div
+                  >, <div :class="`text-[${INPUT_NUMBER_COLOR}]`"> {{ t('formulaEditor.function.argSecond') }} </div>,
+                  ... )
+                </div>
+                <div class="function-desc-text">{{ t('formulaEditor.function.mergeText') }}</div>
+                <div class="flex items-center">
+                  <div :style="{ color: FUN_COLOR }">CONCATENATE</div>(<div :class="`text-[${INPUT_NUMBER_COLOR}]`">
+                    {{ t('formulaEditor.function.argFirst') }} </div
+                  >,"-",
+                  <div :class="`text-[${INPUT_NUMBER_COLOR}]`"> {{ t('formulaEditor.function.argSecond') }} </div>, ...
+                  )
+                </div>
+                <div class="function-desc-text">{{ t('formulaEditor.function.mergeTextWithSeparator') }}</div>
+              </div>
+            </div>
+            <div v-if="activeFun?.name === 'TEXT'">
+              <div class="flex items-center">
+                <div :style="{ color: FUN_COLOR }">TEXT</div>(<div :class="`text-[${TEXT_COLOR}]`">
+                  {{ t('formulaEditor.function.formatDateOrNumber') }} </div
+                >, <div :class="`text-[${TEXT_COLOR}]`"> {{ t('formulaEditor.function.formatCodeText') }} </div>, )
+              </div>
+            </div>
+            <div v-if="activeFun?.name === 'IFS'">
+              <div class="flex flex-wrap items-center">
+                <div :style="{ color: FUN_COLOR }">IFS</div>(<div :class="`text-[${TEXT_COLOR}]`"> A1>90 </div>,
+                <div :class="`text-[${TEXT_COLOR}]`"> "优秀" </div>,
+                <div :class="`text-[${TEXT_COLOR}]`"> A1>=60 </div>,
+                <div :class="`text-[${TEXT_COLOR}]`"> "及格" </div>, <div :class="`text-[${TEXT_COLOR}]`"> TRUE </div>,
+                <div :class="`text-[${TEXT_COLOR}]`"> "不及格" </div>
+                )
+              </div>
+            </div>
+            <div v-if="activeFun?.name === 'TODAY'">
+              <div class="function-desc-text">获取当前日期:</div>
+              <div class="flex flex-wrap items-center gap-[2px]">
+                <div :style="{ color: FUN_COLOR }">TODAY</div>( )
+              </div>
+              <div class="function-desc-text">计算日期差:</div>
+              <div class="flex flex-wrap items-center gap-[2px]">
+                <div :style="{ color: FUN_COLOR }">TODAY</div>( )
+                <div> - </div>
+                <div :class="`text-[${TEXT_COLOR}]`"> A1 </div>
+                （A1 为历史日期）
+              </div>
+            </div>
+            <div v-if="activeFun?.name === 'NOW'">
+              <div class="function-desc-text">获取当前日期时间:</div>
+              <div class="flex flex-wrap items-center gap-[2px]"> <div :style="{ color: FUN_COLOR }">NOW</div>( ) </div>
+              <div class="function-desc-text">计算时间差:</div>
+              <div class="flex flex-wrap items-center gap-[2px]">
+                <div :style="{ color: FUN_COLOR }">NOW</div>( )
+                <div> - </div>
+                <div :class="`text-[${TEXT_COLOR}]`"> A1 </div>
+                （A1 为历史日期）
+              </div>
+            </div>
+            <div v-else class="function-desc-text">
+              {{ t('crmFormDesign.formulaSelectUsageTip') }}
+            </div>
+          </div>
+        </div>
+      </div>
+      <div v-if="isEmpty" class="formula-placeholder flex flex-col items-start">
+        <div class="text-[var(--text-n6)]">{{ t('crmFormDesign.formulaPlaceholder') }}</div>
+
+        <div class="flex items-center">
+          <div :style="{ color: FUN_COLOR }">SUM</div>(<div :style="{ color: ARRAY_COLOR }">订阅产品.金额</div>) +
+          <div :style="{ color: FUN_COLOR }">SUM</div>(<div :style="{ color: ARRAY_COLOR }">授权产品.金额</div>) +
+          <div :style="{ color: FUN_COLOR }">SUM</div>(<div :style="{ color: ARRAY_COLOR }">续费产品.金额</div>)
+        </div>
+      </div>
+    </div>
+  </n-scrollbar>
+</template>
+
+<script setup lang="ts">
+  import { NButton, NDivider, NScrollbar, NTooltip } from 'naive-ui';
+  import { debounce } from 'lodash-es';
+
+  import { FieldTypeEnum } from '@lib/shared/enums/formDesignEnum';
+  import { useI18n } from '@lib/shared/hooks/useI18n';
+
+  import CrmCollapse from '@/components/pure/crm-collapse/index.vue';
+  import CrmSearchInput from '@/components/pure/crm-search-input/index.vue';
+  import CrmTag from '@/components/pure/crm-tag/index.vue';
+  import { FormCreateField } from '@/components/business/crm-form-create/types';
+
+  import {
+    allFunctionSource,
+    ARRAY_COLOR,
+    DATE_TIME_COLOR,
+    FUN_COLOR,
+    INPUT_NUMBER_COLOR,
+    TEXT_COLOR,
+    TEXT_TYPE,
+  } from './config';
+  import diagnoseFormula from './diagnose/diagnose';
+  import parseTokensToAST from './parser';
+  import { createFunctionNode, renderTokensToEditor } from './parseSource/renderTokens';
+  import { serializeFormulaFromAst, tokenizeFromSource } from './parseSource/serializeFormulaFromAst';
+  import tokenizeFromEditor from './tokenizer';
+  import { FormulaDiagnostic, FormulaFieldMeta } from './types';
+  import { deleteAtomicNode, findLeftAtomicDeep, insertRangeAtomic, safeParseFormula } from './utils';
+
+  const { t } = useI18n();
+
+  export type FormulaFormCreateField = FormCreateField & {
+    parentId?: string;
+    parentName?: string;
+    inSubTable?: boolean;
+  };
+
+  const props = defineProps<{
+    fieldConfig: FormCreateField;
+    formFields: FormCreateField[];
+    isSubTableField?: boolean;
+  }>();
+
+  const emit = defineEmits<{
+    (e: 'save', astVal: string): void;
+  }>();
+
+  const FUNCTION_NAMES = ['SUM', 'DAYS', 'CONCATENATE'];
+
+  const formulaDiagnostics = ref<FormulaDiagnostic[]>([]);
+  const keyword = ref('');
+  const activeFun = ref<FormCreateField | null>(null);
+
+  const colorThemeMap: Record<string, any> = {
+    [FieldTypeEnum.INPUT_NUMBER]: {
+      type: 'info',
+      label: t('crmFormDesign.inputNumber'),
+    },
+    [FieldTypeEnum.DATE_TIME]: {
+      type: 'success',
+      label: t('crmFormDesign.dateTime'),
+    },
+    ARRAY: {
+      type: 'warning',
+      label: t('common.array'),
+    },
+    TEXT: {
+      type: 'primary',
+      label: t('common.text'),
+    },
+  };
+
+  function resolveFieldId(e: FormCreateField, inSubTable?: boolean) {
+    const id = e.id.split('_').pop() ?? '';
+    if (e.resourceFieldId) {
+      return id;
+    }
+    if (inSubTable) {
+      return e.businessKey || id;
+    }
+    return id;
+  }
+
+  const allowFormulaType = [FieldTypeEnum.INPUT_NUMBER, FieldTypeEnum.DATE_TIME];
+
+  function pushByType(
+    field: FormCreateField,
+    numberGroup: FormCreateField[],
+    dateGroup: FormCreateField[],
+    textGroup: FormCreateField[],
+    isSubTable?: boolean
+  ) {
+    if (field.type === FieldTypeEnum.INPUT_NUMBER) {
+      numberGroup.push({
+        ...field,
+        id: resolveFieldId(field, isSubTable),
+      });
+    }
+
+    if (field.type === FieldTypeEnum.DATE_TIME) {
+      dateGroup.push({
+        ...field,
+        id: resolveFieldId(field, isSubTable),
+      });
+    }
+    if (TEXT_TYPE.includes(field.type)) {
+      textGroup.push({
+        ...field,
+        id: resolveFieldId(field, isSubTable),
+      });
+    }
+  }
+
+  function flatAllFields(fields: FormCreateField[]) {
+    const result: (FormCreateField & { parentId?: string; parentName?: string; inSubTable?: boolean })[] = [];
+    fields.forEach((field) => {
+      if (field.subFields) {
+        field.subFields.forEach((sub) => {
+          result.push({
+            ...sub,
+            parentId: field.id,
+            id: resolveFieldId(sub),
+            parentName: field.name,
+            inSubTable: true,
+          });
+        });
+      } else {
+        result.push({
+          ...field,
+          inSubTable: false,
+        });
+      }
+    });
+
+    return result;
+  }
+
+  const allFormFields = computed(() => flatAllFields(props.formFields));
+
+  function isSameSubTableNumberField(field: FormulaFormCreateField) {
+    const currentField = allFormFields.value.find((e) => e.id === resolveFieldId(props.fieldConfig));
+    return field.inSubTable && field.parentId === currentField?.parentId && field.type === FieldTypeEnum.INPUT_NUMBER;
+  }
+
+  function classifyFields(allFields: FormulaFormCreateField[]) {
+    const numberGroup: FormulaFormCreateField[] = [];
+    const dateGroup: FormulaFormCreateField[] = [];
+    const arrayGroup: FormulaFormCreateField[] = [];
+    const textGroup: FormulaFormCreateField[] = [];
+    allFields.forEach((field) => {
+      // 当前在子表内
+      if (props.isSubTableField) {
+        if (field.inSubTable && [FieldTypeEnum.INPUT_NUMBER].includes(field.type) && isSameSubTableNumberField(field)) {
+          pushByType(field, numberGroup, dateGroup, textGroup, true);
+        }
+        return;
+      }
+
+      // 不在子表内
+      if (!field.inSubTable) {
+        pushByType(field, numberGroup, dateGroup, textGroup);
+      }
+      if (field.inSubTable && [...allowFormulaType, FieldTypeEnum.FORMULA].includes(field.type)) {
+        // 生成路径字段
+        arrayGroup.push({
+          ...field,
+          id: `${field.parentId}.${resolveFieldId(field, field.inSubTable)}`,
+          name: `${field.parentName}.${field.name}`,
+        });
+      }
+    });
+
+    return { numberGroup, dateGroup, arrayGroup, textGroup };
+  }
+
+  const allFieldListSource = computed(() => {
+    const { numberGroup, dateGroup, arrayGroup, textGroup } = classifyFields(allFormFields.value);
+    return [
+      {
+        name: t('crmFormDesign.inputNumber'),
+        type: FieldTypeEnum.INPUT_NUMBER,
+        children: numberGroup,
+      },
+      {
+        name: t('crmFormDesign.dateTime'),
+        type: FieldTypeEnum.DATE_TIME,
+        children: dateGroup,
+      },
+      {
+        name: t('common.array'),
+        type: 'ARRAY',
+        children: arrayGroup,
+      },
+      {
+        name: t('common.text'),
+        type: 'TEXT',
+        children: textGroup,
+      },
+    ];
+  });
+
+  const allFieldList = computed(() => {
+    const key = keyword.value.trim();
+    if (!key) {
+      return allFieldListSource.value;
+    }
+    return allFieldListSource.value.map((group) => ({
+      ...group,
+      children: group.children.filter((child) => child.name?.includes(key)),
+    }));
+  });
+
+  const cursorRange = ref<Range | null>(null);
+  const isEmpty = ref(true);
+  const editor = ref<HTMLElement | null>(null);
+
+  function handleInput() {
+    const text = editor.value?.innerText.trim() ?? '';
+    isEmpty.value = text.length === 0;
+  }
+
+  function handleFocus() {
+    isEmpty.value = false;
+  }
+
+  function handleBlur() {
+    handleInput();
+  }
+
+  function saveCursor() {
+    const selection = window.getSelection();
+    if (selection && selection.rangeCount > 0) {
+      cursorRange.value = selection.getRangeAt(0);
+    }
+  }
+
+  function ensureCursor(edt: HTMLElement) {
+    if (!cursorRange.value || !edt.contains(cursorRange.value.startContainer)) {
+      const range = document.createRange();
+      range.selectNodeContents(edt);
+      range.collapse(false);
+
+      const sel = window.getSelection();
+      sel?.removeAllRanges();
+      sel?.addRange(range);
+
+      cursorRange.value = range;
+    }
+  }
+
+  const validateCurrentFormula = debounce(() => {
+    if (!editor.value) return;
+
+    const tokens = tokenizeFromEditor(editor.value);
+    const ast = parseTokensToAST(tokens);
+    formulaDiagnostics.value = diagnoseFormula(tokens, ast);
+    // TODO 高亮先不做
+    // applyDiagnosticsHighlight(editor.value, diagnostics);
+  }, 200);
+
+  type FormulaNodeMeta = {
+    text: string;
+    color?: string;
+    isFunction: boolean;
+  };
+
+  function getFormulaNodeMeta(item: FormCreateField & { isFunction?: boolean }): FormulaNodeMeta {
+    if (item.isFunction) {
+      return {
+        text: `${item.name}`,
+        color: FUN_COLOR,
+        isFunction: true,
+      };
+    }
+
+    // —— 数组字段（二级路径）
+    if (item.id?.includes('.')) {
+      return {
+        text: item.name,
+        color: ARRAY_COLOR,
+        isFunction: false,
+      };
+    }
+
+    // —— 普通字段
+    switch (item.type) {
+      case FieldTypeEnum.INPUT_NUMBER:
+        return {
+          text: item.name,
+          color: INPUT_NUMBER_COLOR,
+          isFunction: false,
+        };
+
+      case FieldTypeEnum.DATE_TIME:
+        return {
+          text: item.name,
+          color: DATE_TIME_COLOR,
+          isFunction: false,
+        };
+      case FieldTypeEnum.INPUT:
+      case FieldTypeEnum.DATA_SOURCE:
+      case FieldTypeEnum.DATA_SOURCE_MULTIPLE:
+      case FieldTypeEnum.SERIAL_NUMBER:
+        return {
+          text: item.name,
+          color: TEXT_COLOR,
+          isFunction: false,
+        };
+
+      default:
+        return {
+          text: item.name,
+          isFunction: false,
+        };
+    }
+  }
+
+  // 插入函数
+  function insertFunction(item: FormCreateField) {
+    if (!editor.value) return;
+    activeFun.value = item;
+    ensureCursor(editor.value);
+    handleFocus();
+    const range = cursorRange.value!;
+    range.deleteContents();
+
+    const { root, args } = createFunctionNode(item.name);
+
+    range.insertNode(root);
+
+    // 光标进参数区
+    const caret = document.createRange();
+    caret.setStart(args.firstChild!, 0);
+    caret.collapse(true);
+
+    const sel = window.getSelection();
+    sel?.removeAllRanges();
+    sel?.addRange(caret);
+
+    cursorRange.value = caret;
+    nextTick(() => {
+      validateCurrentFormula();
+    });
+  }
+
+  function getNumberType(field: FormCreateField) {
+    if (field.type === FieldTypeEnum.INPUT_NUMBER) {
+      return field.numberFormat === 'percent' ? 'percent' : 'number';
+    }
+    if (field.type === FieldTypeEnum.DATE_TIME) {
+      return 'date';
+    }
+    return undefined;
+  }
+
+  // 插入对应的字段
+  function insertField(item: FormCreateField & { isFunction?: boolean }) {
+    if (!editor.value) return;
+
+    if (item.isFunction) {
+      insertFunction(item);
+      return;
+    }
+
+    ensureCursor(editor.value);
+    handleFocus();
+
+    const meta = getFormulaNodeMeta(item);
+
+    const fieldNode = document.createElement('span');
+    fieldNode.className = 'formula-tag-wrapper';
+    fieldNode.contentEditable = 'false';
+    fieldNode.dataset.nodeType = 'field';
+    fieldNode.dataset.value = item.id;
+    fieldNode.dataset.fieldType = item.type;
+    const numberType = getNumberType(item);
+    if (numberType) {
+      fieldNode.dataset.numberType = numberType;
+    }
+
+    if (meta.color) {
+      fieldNode.style.color = meta.color;
+    }
+
+    fieldNode.textContent = item.name;
+
+    insertRangeAtomic(editor.value, fieldNode);
+
+    nextTick(() => {
+      validateCurrentFormula();
+    });
+  }
+
+  function replaceWithFunctionNode(range: Range, fnName: string) {
+    range.deleteContents();
+
+    const { root, args } = createFunctionNode(fnName);
+
+    range.insertNode(root);
+
+    // 光标进入参数区
+    const caret = document.createRange();
+    caret.setStart(args.firstChild!, 0);
+    caret.collapse(true);
+
+    const sel = window.getSelection();
+    sel?.removeAllRanges();
+    sel?.addRange(caret);
+
+    cursorRange.value = caret;
+  }
+
+  function upgradePlainFunction(root: HTMLElement) {
+    const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, null);
+    const textNodes: Text[] = [];
+
+    while (walker.nextNode()) {
+      const textNode = walker.currentNode as Text;
+      const parent = textNode.parentElement;
+
+      const canProcess = !!parent && !parent.closest('.formula-fn-root') && !parent.closest('.fn-args');
+
+      if (canProcess) {
+        textNodes.push(textNode);
+      }
+    }
+
+    textNodes.forEach((textNode) => {
+      const text = textNode.nodeValue ?? '';
+
+      FUNCTION_NAMES.forEach((fnName) => {
+        const reg = new RegExp(`\\b${fnName}\\(`);
+        const match = reg.exec(text);
+
+        if (match) {
+          const start = match.index;
+          const end = start + fnName.length + 1; // fn + '('
+
+          const range = document.createRange();
+          range.setStart(textNode, start);
+          range.setEnd(textNode, end);
+
+          replaceWithFunctionNode(range, fnName);
+        }
+      });
+    });
+  }
+
+  function handleEditorInput() {
+    upgradePlainFunction(editor.value!);
+    validateCurrentFormula();
+  }
+
+  function getCalculateFormula(): string | undefined {
+    if (!editor.value) return;
+    const tokens = tokenizeFromEditor(editor.value);
+    const ast = parseTokensToAST(tokens);
+
+    const fieldMap: Record<string, string> = {};
+    flatAllFields(props.formFields).forEach((item) => {
+      fieldMap[item.id] = item.name;
+    });
+
+    const saveResult = serializeFormulaFromAst(ast, fieldMap);
+
+    const result = JSON.stringify(saveResult);
+    console.log(result, 'result');
+    return result;
+  }
+
+  function handleClearFormulaField() {
+    if (!editor.value) return;
+    editor.value.innerHTML = '';
+    ensureCursor(editor.value);
+    isEmpty.value = true;
+    formulaDiagnostics.value = [];
+  }
+
+  function initFormula() {
+    nextTick(async () => {
+      if (editor.value) {
+        const { source, fields } = safeParseFormula(props.fieldConfig.formula ?? '');
+        const fieldMap: Record<string, FormulaFormCreateField> = {};
+        const { numberGroup, dateGroup, arrayGroup, textGroup } = classifyFields(allFormFields.value);
+        [...numberGroup, ...dateGroup, ...arrayGroup, ...textGroup].forEach((item) => {
+          if (fields?.map((f: FormulaFieldMeta) => f.fieldId)?.includes(item.id)) {
+            fieldMap[item.id] = item;
+          }
+        });
+        const tokens = tokenizeFromSource(source, fieldMap);
+
+        renderTokensToEditor(editor.value, tokens);
+        await nextTick();
+        validateCurrentFormula();
+        if (source) {
+          isEmpty.value = false;
+        }
+      }
+    });
+  }
+
+  function handleBackspaceAtomic(e: KeyboardEvent) {
+    if (e.key !== 'Backspace') return;
+
+    const sel = window.getSelection();
+    if (!sel || sel.rangeCount === 0) return;
+
+    const range = sel.getRangeAt(0);
+
+    // 有选区：整体删
+    if (!range.collapsed) {
+      const el =
+        range.commonAncestorContainer instanceof HTMLElement
+          ? range.commonAncestorContainer.closest('[contenteditable="false"]')
+          : null;
+
+      if (el) {
+        e.preventDefault();
+        deleteAtomicNode(el as HTMLElement);
+      }
+      return;
+    }
+
+    const { startContainer, startOffset } = range;
+
+    const atomic = findLeftAtomicDeep(startContainer, startOffset);
+    if (atomic) {
+      e.preventDefault();
+      deleteAtomicNode(atomic);
+    }
+  }
+
+  watch(
+    () => props.fieldConfig.formula,
+    () => {
+      initFormula();
+    }
+  );
+
+  onMounted(() => {
+    initFormula();
+    editor.value?.addEventListener('keydown', handleBackspaceAtomic);
+  });
+
+  defineExpose({
+    getCalculateFormula,
+    handleClearFormulaField,
+    editor,
+  });
+</script>
+
+<style scoped lang="less">
+  .crm-form-design-formula-wrapper {
+    position: relative;
+    display: flex;
+    min-height: 40px;
+    border-radius: 6px;
+    color: var(--text-n1);
+    @apply flex flex-col;
+    .crm-form-design-formula-editor {
+      padding: 16px 16px 8px;
+      min-height: 100px;
+      max-height: 800px;
+      border: 0.5px solid var(--text-n7);
+      border-radius: 0 0 4px 4px;
+      outline: none;
+      flex: 1;
+      gap: 8px;
+      .crm-scroll-bar();
+      @apply: h-full w-full overflow-y-auto flex items-center;
+      &:focus {
+        border-color: var(--primary-8);
+        outline: none;
+      }
+    }
+    .formula-placeholder {
+      position: absolute;
+      top: 0;
+      left: 0;
+      padding: 16px 16px 0;
+      gap: 8px;
+      pointer-events: none; /* 不阻止输入 */
+      @apply flex;
+    }
+  }
+  .crm-form-design-formula-header {
+    padding: 0 16px;
+    height: 32px;
+    line-height: 32px;
+    border: 0.5px solid var(--text-n7);
+    border-bottom: none;
+    border-radius: 4px 4px 0 0;
+    background: var(--text-n9);
+    @apply flex items-center justify-between;
+    .ph-prefix {
+      margin-right: 4px;
+      font-weight: 600;
+      color: var(--text-n1);
+    }
+  }
+  .field-wrapper {
+    @apply flex;
+
+    min-width: 250px;
+    border: 1px solid var(--text-n7);
+    border-radius: 4px;
+    background: var(--text-n9);
+    .field-item {
+      @apply flex w-1/3  flex-1  flex-col;
+
+      border-radius: 4px;
+      .field-item-title {
+        padding: 4px 8px;
+        @apply font-semibold;
+
+        border-right: 1px solid var(--text-n7);
+        color: var(--text-n1);
+      }
+      &:nth-of-type(2) .field-item-title {
+        border-bottom: 1px solid var(--text-n7);
+      }
+      &:last-child .field-item-title {
+        border-right: none;
+        border-bottom: 1px solid var(--text-n7);
+      }
+      .field-item-content {
+        padding: 12px;
+        @apply flex flex-1 flex-col;
+
+        border-right: 1px solid var(--text-n7);
+        background: var(--text-n10);
+        .field-fun-item {
+          padding: 0 4px;
+          @apply cursor-pointer rounded;
+          &:hover {
+            background: var(--text-n9);
+          }
+          &.active {
+            background: var(--text-n9);
+          }
+        }
+      }
+      &:last-child .field-item-content {
+        border-right: none;
+        background: none;
+      }
+    }
+  }
+  .field-item-collapse {
+    margin-bottom: 16px;
+    padding: 0;
+    .n-collapse-item {
+      .n-collapse-item__content-wrapper {
+        .n-collapse-item__content-inner {
+          padding-top: 8px !important;
+        }
+      }
+    }
+  }
+  :deep(.n-collapse-item__content-inner) {
+    padding-top: 0 !important;
+  }
+  .field-search-input {
+    margin-left: -1px;
+    max-width: calc(100% + 1px);
+    .n-input-wrapper {
+      width: calc(100% + 1px);
+    }
+
+    --n-border-radius: 0 !important;
+  }
+  .crm-form-design-formula-editor {
+    line-height: 24px;
+  }
+  [contenteditable] {
+    :focus {
+      border-radius: 3px;
+      outline: none;
+      line-height: 14px;
+      box-shadow: inset 0 0 0 0.5px var(--primary-8);
+    }
+    :focus-visible {
+      outline: none;
+    }
+  }
+  .function-desc-text {
+    font-size: 12px;
+    color: var(--text-n4);
+  }
+</style>
